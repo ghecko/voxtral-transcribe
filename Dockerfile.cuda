@@ -1,0 +1,24 @@
+# Dockerfile for VoxtralX on NVIDIA CUDA
+FROM pytorch/pytorch:2.10.0-cuda13.0-cudnn9-runtime
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libsndfile1 \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy project files
+COPY . .
+
+# Set environment variables
+ENV HF_HOME=/app/models
+ENV PYTHONPATH=/app
+
+ENTRYPOINT ["python", "main.py"]

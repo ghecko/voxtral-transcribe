@@ -1,0 +1,61 @@
+services:
+  voxtral-transcribe-rocm:
+    build:
+      context: .
+      dockerfile: Dockerfile.rocm
+    image: voxtral-transcribe:rocm
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    privileged: true
+    group_add:
+      - video
+      - render
+    security_opt:
+      - seccomp:unconfined
+    volumes:
+      - .:/app
+      - ./outputs:/outputs
+      - ./data:/data
+      - voxtral_hf_cache:/app/models
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - PYTHONFAULTHANDLER=1
+    command: /data/audio.mp3 --output-dir /outputs --device rocm
+
+  voxtral-transcribe-cuda:
+    build:
+      context: .
+      dockerfile: Dockerfile.cuda
+    image: voxtral-transcribe:cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - .:/app
+      - ./outputs:/outputs
+      - ./data:/data
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+    command: /data/audio.mp3 --output-dir /outputs --device cuda
+
+  voxtral-transcribe-cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    image: voxtral-transcribe:cpu
+    volumes:
+      - .:/app
+      - ./outputs:/outputs
+      - ./data:/data
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+    command: /data/audio.mp3 --output-dir /outputs --device cpu
+
+volumes:
+  voxtral_hf_cache:
+
