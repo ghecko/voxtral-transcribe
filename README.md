@@ -3,7 +3,7 @@
 **voxtral-transcribe** is a high-performance audio transcription and diarization pipeline optimized for Mistral's **Voxtral** models. It integrates Silero VAD for segmenting, Pyannote for speaker identification, and Hugging Face **Transformers** for native execution on AMD ROCm, NVIDIA CUDA, and CPU.
 
 > [!NOTE]
-> This repository was vide-coded to provide an immediate solution for Voxtral-based transcription needs. It prioritizes stability and speed of deployment.
+> This repository was vibe-coded to provide an immediate solution for Voxtral-based transcription needs. It prioritizes stability and speed of deployment.
 > Not tested for cuda and cpu based hardware, and tested only with `mistralai/Voxtral-Mini-4B-Realtime-2602` model.
 
 ## Comparison with WhisperX
@@ -33,7 +33,7 @@ While inspired by WhisperX, this project has specific differences in its approac
 
 ## Getting Started (Docker Implementation)
 
-To ensure no modifications to your host system, VoxtralX runs entirely within Docker.
+To ensure no modifications to your host system, Voxtral-transcribe runs entirely within Docker.
 
 ### 1. Build the Target Image
 
@@ -52,6 +52,9 @@ docker compose build voxtral-transcribe-cpu
 
 ### 2. Run Processing
 
+#### Prepare your data
+Place the audio files you want to transcribe in the `./audio` directory (create it if it doesn't exist). These files will be accessible inside the container at the path `/data/`.
+
 #### Option A: Docker Compose (Recommended)
 This handles the complex device mappings and volumes automatically.
 
@@ -59,11 +62,9 @@ This handles the complex device mappings and volumes automatically.
 # Set your HF token
 export HF_TOKEN="your_token_here"
 
-# Run with the default file (audio.mp3)
-docker compose run --rm voxtral-transcribe-rocm
-
-# Pass a CUSTOM audio file and arguments
-docker compose run --rm voxtral-transcribe-rocm /data/your_audio.wav --output-dir /outputs --native-diarize
+# Run processing on a specific file
+# Note: The file path must start with /data/ (mapping to your ./audio folder)
+docker compose run --rm voxtral-transcribe-rocm /data/your_audio.mp3
 ```
 
 > [!TIP]

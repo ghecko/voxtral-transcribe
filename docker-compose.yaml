@@ -16,12 +16,12 @@ services:
     volumes:
       - .:/app
       - ./outputs:/outputs
-      - ./data:/data
+      - ./audio:/data
       - voxtral_hf_cache:/app/models
     environment:
       - HF_TOKEN=${HF_TOKEN}
       - PYTHONFAULTHANDLER=1
-    command: /data/audio.mp3 --output-dir /outputs --device rocm
+    command: --help --device rocm
 
   voxtral-transcribe-cuda:
     build:
@@ -38,10 +38,10 @@ services:
     volumes:
       - .:/app
       - ./outputs:/outputs
-      - ./data:/data
+      - ./audio:/data
     environment:
       - HF_TOKEN=${HF_TOKEN}
-    command: /data/audio.mp3 --output-dir /outputs --device cuda
+    command: --help --device cuda
 
   voxtral-transcribe-cpu:
     build:
@@ -51,10 +51,10 @@ services:
     volumes:
       - .:/app
       - ./outputs:/outputs
-      - ./data:/data
+      - ./audio:/data
     environment:
       - HF_TOKEN=${HF_TOKEN}
-    command: /data/audio.mp3 --output-dir /outputs --device cpu
+    command: --help --device cpu
 
 volumes:
   voxtral_hf_cache:
