@@ -58,14 +58,9 @@ def main():
     console.print(f"  Detected {len(unique_speakers)} speaker(s): {', '.join(sorted(unique_speakers))}")
     console.print(f"  {len(speaker_segments)} speech segments found")
 
-    # Clamp overlapping segments so no audio region is transcribed twice.
-    # When speakers overlap, the earlier segment keeps the overlap region.
-    speaker_segments.sort(key=lambda s: s["start"])
-    for i in range(1, len(speaker_segments)):
-        if speaker_segments[i]["start"] < speaker_segments[i-1]["end"]:
-            speaker_segments[i]["start"] = speaker_segments[i-1]["end"]
-    # Remove segments that became zero or negative length after clamping
-    speaker_segments = [s for s in speaker_segments if s["end"] > s["start"]]
+    # Note: Pyannote segments may overlap during simultaneous speech.
+    # We intentionally do NOT clamp overlaps — losing content is worse
+    # than minor duplication, and the model handles mixed audio reasonably.
 
     # --- Stage 4: Transcribe each segment ---
     console.print(f"[bold green]Transcribing {len(speaker_segments)} segments...[/bold green]")
