@@ -50,38 +50,65 @@ def main():
     
     console.print(f"[bold green]Processing {len(speech_chunks)} speech segments with speaker reconciliation...[/bold green]")
     
-    for i, chunk in enumerate(speech_chunks):
-        start_samp = int(chunk["start"] * sampling_rate)
-        end_samp = int(chunk["end"] * sampling_rate)
-        segment_audio = audio[start_samp:end_samp]
-        
-        # Determine speaker by finding overlapping diarization segment
-        current_speaker = "Unknown"
-        max_overlap = 0
-        for seg in speaker_segments:
-            overlap = min(chunk["end"], seg["end"]) - max(chunk["start"], seg["start"])
-            if overlap > max_overlap:
-                max_overlap = overlap
-                current_speaker = seg["speaker"]
-        
-        console.print(f"  Trancribing segment {i+1}/{len(speech_chunks)} ({chunk['start']:.2f}s - {chunk['end']:.2f}s) -> [bold]{current_speaker}[/bold]")
-        text = transcriber.transcribe_segment(segment_audio)
-        
-        # Skip empty or whitespace-only segments
-        if not text or not text.strip():
-            continue
+    segment_count = 0
+    for chunk in speech_chunks:
+        chunk_start = chunk["start"]
+        chunk_end = chunk["end"]
 
-        # Merge with previous segment if speaker is the same
-        if final_data and final_data[-1]["speaker"] == current_speaker:
-            final_data[-1]["end"] = round(chunk["end"], 3)
-            final_data[-1]["text"] += " " + text
-        else:
-            final_data.append({
-                "start": round(chunk["start"], 3),
-                "end": round(chunk["end"], 3),
-                "speaker": current_speaker,
-                "text": text
-            })
+        # Find all Pyannote speaker segments that overlap this VAD chunk
+        overlapping = []
+        for seg in speaker_segments:
+            overlap_start = max(chunk_start, seg["start"])
+            overlap_end = min(chunk_end, seg["end"])
+            if overlap_end > overlap_start:
+                overlapping.append({
+                    "start": overlap_start,
+                    "end": overlap_end,
+                    "speaker": seg["speaker"]
+                })
+
+        # If no diarization info, treat the whole chunk as one unknown speaker
+        if not overlapping:
+            overlapping = [{"start": chunk_start, "end": chunk_end, "speaker": "Unknown"}]
+
+        # Sort by start time and transcribe each sub-segment individually
+        # Clamp boundaries so no two sub-segments share audio (prevents duplicates)
+        overlapping.sort(key=lambda x: x["start"])
+        prev_end = chunk_start
+        for sub in overlapping:
+            sub["start"] = max(sub["start"], prev_end)
+            prev_end = sub["end"]
+        overlapping = [s for s in overlapping if s["end"] > s["start"]]
+        segment_count += len(overlapping)
+
+        for sub in overlapping:
+            start_samp = int(sub["start"] * sampling_rate)
+            end_samp = int(sub["end"] * sampling_rate)
+            # Guard against sub-segments that are too short to be useful (<0.3s)
+            if (end_samp - start_samp) < int(0.3 * sampling_rate):
+                continue
+            segment_audio = audio[start_samp:end_samp]
+            speaker = sub["speaker"]
+
+            console.print(f"  Transcribing sub-segment ({sub['start']:.2f}s - {sub['end']:.2f}s) -> [bold]{speaker}[/bold]")
+            text = transcriber.transcribe_segment(segment_audio)
+
+            # Skip empty or whitespace-only segments
+            if not text or not text.strip():
+                continue
+
+            # Merge with previous segment if speaker is the same
+            if final_data and final_data[-1]["speaker"] == speaker:
+                final_data[-1]["end"] = round(sub["end"], 3)
+                final_data[-1]["text"] += " " + text
+            else:
+                final_data.append({
+                    "start": round(sub["start"], 3),
+                    "end": round(sub["end"], 3),
+                    "speaker": speaker,
+                    "text": text
+                })
+
 
     # Save outputs
     base_name = os.path.splitext(os.path.basename(args.input))[0]
