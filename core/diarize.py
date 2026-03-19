@@ -25,7 +25,8 @@ class DiarizationAnalyzer:
         Diarize preloaded audio and return speaker segments.
         """
         # Convert numpy to torch tensor and add channel dimension
-        waveform = torch.from_numpy(audio).unsqueeze(0)
+        # Copy to ensure the array is writable before converting to a torch tensor
+        waveform = torch.from_numpy(audio.copy()).unsqueeze(0)
         
         # Pyannote expects a dictionary for in-memory audio
         input_data = {"waveform": waveform, "sample_rate": sampling_rate}
