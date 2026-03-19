@@ -1,6 +1,5 @@
 pyannote.audio
 ffmpeg-python
-silero-vad
 pydantic
 rich
 mistral-common
@@ -8,4 +7,3 @@ numpy
 soundfile
 transformers>=4.49.0
 accelerate
-hqq

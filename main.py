@@ -1,14 +1,13 @@
 import argparse
 import sys
 import os
+import time
 import warnings
 
 # Suppress pyannote's verbose warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pyannote.audio")
 from rich.console import Console
 from core.audio import load_audio
-from core.vad import VADAnalyzer
-# NOW we can safely import and initialize GPU-based libraries
 from core.diarize import DiarizationAnalyzer
 from core.format import OutputFormatter
 from core.transcribe import VoxtralTranscriber
@@ -16,13 +15,15 @@ from core.transcribe import VoxtralTranscriber
 console = Console()
 
 def main():
-    parser = argparse.ArgumentParser(description="VoxtralX: Audio Processing with Voxtral")
+    parser = argparse.ArgumentParser(description="voxtral-transcribe: Audio Processing with Voxtral")
     parser.add_argument("input", help="Path to input audio file")
     parser.add_argument("--output-dir", default="outputs", help="Directory to save outputs")
     parser.add_argument("--model", default="mistralai/Voxtral-Mini-4B-Realtime-2602", help="Voxtral model ID")
     parser.add_argument("--device", choices=["cuda", "rocm", "cpu"], default="rocm", help="Hardware device")
     parser.add_argument("--hf-token", help="Hugging Face token for Pyannote")
-    parser.add_argument("--native-diarize", action="store_true", help="Use Voxtral native diarization hack instead of Pyannote")
+    parser.add_argument("--num-speakers", type=int, default=None, help="Exact number of speakers (improves accuracy)")
+    parser.add_argument("--min-speakers", type=int, default=None, help="Minimum number of speakers")
+    parser.add_argument("--max-speakers", type=int, default=None, help="Maximum number of speakers")
 
     args = parser.parse_args()
 
@@ -31,92 +32,105 @@ def main():
         sys.exit(1)
 
     os.makedirs(args.output_dir, exist_ok=True)
+    start_time = time.time()
 
+    # --- Stage 1: Load audio ---
     console.print(f"[bold blue]Loading audio:[/bold blue] {args.input}")
     audio = load_audio(args.input)
-    
-    console.print("[bold green]Running VAD...[/bold green]")
-    vad = VADAnalyzer(device="cpu") # Silero VAD is fast on CPU
-    speech_chunks = vad.get_speech_chunks(audio)
-    
+    audio_duration = len(audio) / 16000
+    console.print(f"  Audio duration: {audio_duration:.1f}s")
+
+    # --- Stage 2: Load model ---
     transcriber = VoxtralTranscriber(model_id=args.model, device=args.device)
+
+    # --- Stage 3: Diarization (includes built-in VAD) ---
+    console.print("[bold cyan]Running Pyannote Diarization (includes VAD)...[/bold cyan]")
+    diarizer = DiarizationAnalyzer(auth_token=args.hf_token)
+    speaker_segments = diarizer.diarize(
+        audio,
+        num_speakers=args.num_speakers,
+        min_speakers=args.min_speakers,
+        max_speakers=args.max_speakers,
+    )
+
+    # Detect unique speakers
+    unique_speakers = set(s["speaker"] for s in speaker_segments)
+    console.print(f"  Detected {len(unique_speakers)} speaker(s): {', '.join(sorted(unique_speakers))}")
+    console.print(f"  {len(speaker_segments)} speech segments found")
+
+    # Clamp overlapping segments so no audio region is transcribed twice.
+    # When speakers overlap, the earlier segment keeps the overlap region.
+    speaker_segments.sort(key=lambda s: s["start"])
+    for i in range(1, len(speaker_segments)):
+        if speaker_segments[i]["start"] < speaker_segments[i-1]["end"]:
+            speaker_segments[i]["start"] = speaker_segments[i-1]["end"]
+    # Remove segments that became zero or negative length after clamping
+    speaker_segments = [s for s in speaker_segments if s["end"] > s["start"]]
+
+    # --- Stage 4: Transcribe each segment ---
+    console.print(f"[bold green]Transcribing {len(speaker_segments)} segments...[/bold green]")
     
     final_data = []
     sampling_rate = 16000
-    
-    console.print("[bold cyan]Running Pyannote Diarization...[/bold cyan]")
-    diarizer = DiarizationAnalyzer(auth_token=args.hf_token)
-    speaker_segments = diarizer.diarize(audio)
-    
-    console.print(f"[bold green]Processing {len(speech_chunks)} speech segments with speaker reconciliation...[/bold green]")
-    
-    segment_count = 0
-    for chunk in speech_chunks:
-        chunk_start = chunk["start"]
-        chunk_end = chunk["end"]
+    last_context = None  # For context-carry between same-speaker segments
+    skipped = 0
 
-        # Find all Pyannote speaker segments that overlap this VAD chunk
-        overlapping = []
-        for seg in speaker_segments:
-            overlap_start = max(chunk_start, seg["start"])
-            overlap_end = min(chunk_end, seg["end"])
-            if overlap_end > overlap_start:
-                overlapping.append({
-                    "start": overlap_start,
-                    "end": overlap_end,
-                    "speaker": seg["speaker"]
-                })
+    for i, seg in enumerate(speaker_segments):
+        start_samp = int(seg["start"] * sampling_rate)
+        end_samp = int(seg["end"] * sampling_rate)
+        duration = seg["end"] - seg["start"]
 
-        # If no diarization info, treat the whole chunk as one unknown speaker
-        if not overlapping:
-            overlapping = [{"start": chunk_start, "end": chunk_end, "speaker": "Unknown"}]
+        # Skip sub-segments shorter than 0.5s — too short for reliable transcription
+        if duration < 0.5:
+            skipped += 1
+            continue
 
-        # Sort by start time and transcribe each sub-segment individually
-        # Clamp boundaries so no two sub-segments share audio (prevents duplicates)
-        overlapping.sort(key=lambda x: x["start"])
-        prev_end = chunk_start
-        for sub in overlapping:
-            sub["start"] = max(sub["start"], prev_end)
-            prev_end = sub["end"]
-        overlapping = [s for s in overlapping if s["end"] > s["start"]]
-        segment_count += len(overlapping)
+        segment_audio = audio[start_samp:end_samp]
+        speaker = seg["speaker"]
 
-        for sub in overlapping:
-            start_samp = int(sub["start"] * sampling_rate)
-            end_samp = int(sub["end"] * sampling_rate)
-            # Guard against sub-segments that are too short to be useful (<0.3s)
-            if (end_samp - start_samp) < int(0.3 * sampling_rate):
-                continue
-            segment_audio = audio[start_samp:end_samp]
-            speaker = sub["speaker"]
+        # Pass context from previous same-speaker segment for continuity
+        context = last_context if (final_data and final_data[-1]["speaker"] == speaker) else None
 
-            console.print(f"  Transcribing sub-segment ({sub['start']:.2f}s - {sub['end']:.2f}s) -> [bold]{speaker}[/bold]")
-            text = transcriber.transcribe_segment(segment_audio)
+        console.print(f"  [{i+1}/{len(speaker_segments)}] ({seg['start']:.2f}s - {seg['end']:.2f}s) -> [bold]{speaker}[/bold]")
+        text = transcriber.transcribe_segment(segment_audio, context=context)
 
-            # Skip empty or whitespace-only segments
-            if not text or not text.strip():
-                continue
+        # Skip empty transcriptions
+        if not text or not text.strip():
+            skipped += 1
+            continue
 
-            # Merge with previous segment if speaker is the same
-            if final_data and final_data[-1]["speaker"] == speaker:
-                final_data[-1]["end"] = round(sub["end"], 3)
-                final_data[-1]["text"] += " " + text
-            else:
-                final_data.append({
-                    "start": round(sub["start"], 3),
-                    "end": round(sub["end"], 3),
-                    "speaker": speaker,
-                    "text": text
-                })
+        # Track context for next segment
+        last_context = text
 
+        # Merge with previous segment if speaker is the same
+        if final_data and final_data[-1]["speaker"] == speaker:
+            final_data[-1]["end"] = round(seg["end"], 3)
+            final_data[-1]["text"] += " " + text
+        else:
+            final_data.append({
+                "start": round(seg["start"], 3),
+                "end": round(seg["end"], 3),
+                "speaker": speaker,
+                "text": text
+            })
 
-    # Save outputs
+    # --- Stage 5: Save outputs ---
     base_name = os.path.splitext(os.path.basename(args.input))[0]
     OutputFormatter.to_json(final_data, os.path.join(args.output_dir, f"{base_name}.json"))
     OutputFormatter.to_markdown(final_data, os.path.join(args.output_dir, f"{base_name}.md"))
     OutputFormatter.to_txt(final_data, os.path.join(args.output_dir, f"{base_name}.txt"))
+    OutputFormatter.to_srt(final_data, os.path.join(args.output_dir, f"{base_name}.srt"))
     
-    console.print(f"[bold green]Done! Outputs saved in {args.output_dir}[/bold green]")
+    # --- Stats summary ---
+    elapsed = time.time() - start_time
+    console.print()
+    console.print("[bold green]━━━ Summary ━━━[/bold green]")
+    console.print(f"  Audio duration : {audio_duration:.1f}s")
+    console.print(f"  Speakers       : {len(unique_speakers)}")
+    console.print(f"  Segments       : {len(final_data)} (skipped {skipped})")
+    console.print(f"  Processing time: {elapsed:.1f}s ({audio_duration/elapsed:.1f}x realtime)")
+    console.print(f"  Outputs        : {args.output_dir}/{base_name}.{{json,md,txt,srt}}")
+    console.print()
 
 if __name__ == "__main__":
     main()
