@@ -24,6 +24,8 @@ def main():
     parser.add_argument("--num-speakers", type=int, default=None, help="Exact number of speakers (improves accuracy)")
     parser.add_argument("--min-speakers", type=int, default=None, help="Minimum number of speakers")
     parser.add_argument("--max-speakers", type=int, default=None, help="Maximum number of speakers")
+    parser.add_argument("--precision", choices=["fp16", "q8", "q4"], default="fp16",
+                        help="Model precision: fp16 (default), q8 (8-bit quantization), q4 (4-bit quantization)")
 
     args = parser.parse_args()
 
@@ -41,7 +43,7 @@ def main():
     console.print(f"  Audio duration: {audio_duration:.1f}s")
 
     # --- Stage 2: Load model ---
-    transcriber = VoxtralTranscriber(model_id=args.model, device=args.device)
+    transcriber = VoxtralTranscriber(model_id=args.model, device=args.device, precision=args.precision)
 
     # --- Stage 3: Diarization (includes built-in VAD) ---
     console.print("[bold cyan]Running Pyannote Diarization (includes VAD)...[/bold cyan]")

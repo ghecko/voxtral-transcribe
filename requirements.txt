@@ -7,3 +7,4 @@ numpy
 soundfile
 transformers>=4.49.0
 accelerate
+bitsandbytes
