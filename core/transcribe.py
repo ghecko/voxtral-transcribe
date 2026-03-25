@@ -9,10 +9,18 @@ from typing import Optional
 logging.getLogger("accelerate.big_modeling").setLevel(logging.ERROR)
 
 class VoxtralTranscriber:
-    def __init__(self, model_id: str = "mistralai/Voxtral-Mini-4B-Realtime-2602", device: str = "cuda", precision: str = "fp16"):
+    def __init__(self, model_id: str = "mistralai/Voxtral-Mini-4B-Realtime-2602", device: str = "cuda",
+                 precision: str = "fp16", flash_attn: bool = False, compile_model: bool = False):
         self.device = device
         self.precision = precision
-        print(f"Loading Transformers model: {model_id} (precision={precision}) using device_map='auto'...")
+        self.compile_model = compile_model
+
+        opts = [f"precision={precision}"]
+        if flash_attn:
+            opts.append("flash_attn2")
+        if compile_model:
+            opts.append("torch.compile")
+        print(f"Loading Transformers model: {model_id} ({', '.join(opts)}) using device_map='auto'...")
         self.processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
 
         # Build quantization config based on precision
@@ -42,10 +50,21 @@ class VoxtralTranscriber:
             if quantization_config is not None:
                 load_kwargs["quantization_config"] = quantization_config
 
+            # Flash Attention 2 — works on ROCm via Composable Kernel (CK) backend
+            if flash_attn:
+                load_kwargs["attn_implementation"] = "flash_attention_2"
+
             self.model = VoxtralRealtimeForConditionalGeneration.from_pretrained(
                 model_id,
                 **load_kwargs,
             )
+
+            # torch.compile — reduces Python overhead and fuses kernels.
+            # Uses "reduce-overhead" mode for best latency on generate() workloads.
+            # ROCm uses the Triton backend by default which works well here.
+            if compile_model:
+                print("  Applying torch.compile (first inference will be slower due to compilation)...")
+                self.model = torch.compile(self.model, mode="reduce-overhead")
         finally:
             hf_logging.set_verbosity(prev_verbosity)
 

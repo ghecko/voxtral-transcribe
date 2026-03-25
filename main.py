@@ -26,6 +26,10 @@ def main():
     parser.add_argument("--max-speakers", type=int, default=None, help="Maximum number of speakers")
     parser.add_argument("--precision", choices=["fp16", "q8", "q4"], default="fp16",
                         help="Model precision: fp16 (default), q8 (8-bit quantization), q4 (4-bit quantization)")
+    parser.add_argument("--flash-attn", action="store_true",
+                        help="Enable Flash Attention 2 (requires flash-attn or ROCm CK backend)")
+    parser.add_argument("--compile", action="store_true",
+                        help="Apply torch.compile for faster inference (first run is slower due to compilation)")
 
     args = parser.parse_args()
 
@@ -43,7 +47,10 @@ def main():
     console.print(f"  Audio duration: {audio_duration:.1f}s")
 
     # --- Stage 2: Load model ---
-    transcriber = VoxtralTranscriber(model_id=args.model, device=args.device, precision=args.precision)
+    transcriber = VoxtralTranscriber(
+        model_id=args.model, device=args.device, precision=args.precision,
+        flash_attn=args.flash_attn, compile_model=args.compile,
+    )
 
     # --- Stage 3: Diarization (includes built-in VAD) ---
     console.print("[bold cyan]Running Pyannote Diarization (includes VAD)...[/bold cyan]")
