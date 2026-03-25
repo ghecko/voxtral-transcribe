@@ -21,5 +21,6 @@ COPY . .
 # Set environment variables
 ENV HF_HOME=/app/models
 ENV PYTHONPATH=/app
+ENV TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1
 
 ENTRYPOINT ["python", "main.py"]
