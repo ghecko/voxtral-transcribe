@@ -14,9 +14,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Flash Attention 2
-RUN pip install --no-cache-dir flash-attn --no-build-isolation
-
 # Copy project files
 COPY . .
 

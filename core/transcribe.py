@@ -17,7 +17,7 @@ class VoxtralTranscriber:
 
         opts = [f"precision={precision}"]
         if flash_attn:
-            opts.append("flash_attn2")
+            opts.append("sdpa")
         if compile_model:
             opts.append("torch.compile")
         print(f"Loading Transformers model: {model_id} ({', '.join(opts)}) using device_map='auto'...")
@@ -50,9 +50,13 @@ class VoxtralTranscriber:
             if quantization_config is not None:
                 load_kwargs["quantization_config"] = quantization_config
 
-            # Flash Attention 2 — works on ROCm via Composable Kernel (CK) backend
+            # SDPA (Scaled Dot-Product Attention) — PyTorch's native implementation
+            # that automatically dispatches to the best available backend:
+            # - ROCm: Composable Kernel (CK) flash attention
+            # - CUDA: FlashAttention-2 or memory-efficient attention
+            # No external packages needed — it's built into PyTorch 2.x+.
             if flash_attn:
-                load_kwargs["attn_implementation"] = "flash_attention_2"
+                load_kwargs["attn_implementation"] = "sdpa"
 
             self.model = VoxtralRealtimeForConditionalGeneration.from_pretrained(
                 model_id,

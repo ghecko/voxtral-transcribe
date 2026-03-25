@@ -27,7 +27,7 @@ def main():
     parser.add_argument("--precision", choices=["fp16", "q8", "q4"], default="fp16",
                         help="Model precision: fp16 (default), q8 (8-bit quantization), q4 (4-bit quantization)")
     parser.add_argument("--flash-attn", action="store_true",
-                        help="Enable Flash Attention 2 (requires flash-attn or ROCm CK backend)")
+                        help="Enable SDPA flash attention (uses PyTorch native backend — CK on ROCm, FA2 on CUDA)")
     parser.add_argument("--compile", action="store_true",
                         help="Apply torch.compile for faster inference (first run is slower due to compilation)")
 
