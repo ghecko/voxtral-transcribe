@@ -6,7 +6,10 @@ Uses torchao's float8_weight_only quantization via HF TorchAoConfig.
 This path uses PyTorch's native FP8 dtype (float8_e4m3fn) — no CUTLASS
 or qutlass dependency, so it works on GB10 (SM120) where NVFP4 is broken.
 
-This is the recommended quantization for the Asus Ascent GX10 / DGX Spark.
+IMPORTANT: torchao must match your PyTorch version. On GB10 / DGX Spark
+with PyTorch 2.11+cu130, install from the PyTorch index:
+    pip install torchao --index-url https://download.pytorch.org/whl/cu130
+Or run inside the NGC container (Dockerfile.spark) where deps are matched.
 
 Requirements:
     pip install transformers>=4.49.0 accelerate torch torchao
@@ -22,11 +25,21 @@ Usage:
 import argparse
 import sys
 import torch
-from transformers import (
-    VoxtralRealtimeForConditionalGeneration,
-    AutoProcessor,
-    TorchAoConfig,
-)
+
+
+def _check_torchao():
+    """Check torchao is installed and compatible with the current PyTorch."""
+    try:
+        import torchao  # noqa: F401
+    except ImportError:
+        return False, "not_installed"
+
+    # Check if the C++ extensions loaded (they fail silently with a warning)
+    try:
+        from torchao.quantization import float8_weight_only  # noqa: F401
+        return True, "ok"
+    except ImportError:
+        return False, "import_error"
 
 
 def main():
@@ -66,14 +79,39 @@ def main():
         print("ERROR: No CUDA GPU detected. FP8 quantization requires an NVIDIA GPU.")
         sys.exit(1)
 
-    try:
-        import torchao  # noqa: F401
-    except ImportError:
-        print("ERROR: torchao is not installed. Required for FP8 quantization.")
-        print("       pip install torchao")
+    ok, status = _check_torchao()
+    if not ok:
+        torch_ver = torch.__version__
+        print("=" * 70)
+        if status == "not_installed":
+            print("ERROR: torchao is not installed.")
+        else:
+            print(f"ERROR: torchao is installed but incompatible with PyTorch {torch_ver}.")
+        print()
+        print("torchao must match your PyTorch version exactly. Install with:")
+        print()
+        if "cu130" in torch_ver:
+            print("  # For PyTorch + CUDA 13.0 (GB10 / DGX Spark):")
+            print("  pip install torchao --index-url https://download.pytorch.org/whl/cu130")
+        else:
+            print(f"  pip install torchao  # for PyTorch {torch_ver}")
+        print()
+        print("Or run this script inside the Docker container where deps are matched:")
+        print("  docker compose run --rm voxtral-transcribe-spark \\")
+        print("    python scripts/quantize_fp8.py --output-dir /app/models/Voxtral-FP8")
+        print()
+        print("Alternative: use bitsandbytes q4 quantization which works now:")
+        print("  python main.py /data/audio.mp3 --precision q4 --flash-attn --compile")
+        print("=" * 70)
         sys.exit(1)
 
     # --- Configure FP8 quantization via TorchAoConfig ---
+    from transformers import (
+        VoxtralRealtimeForConditionalGeneration,
+        AutoProcessor,
+        TorchAoConfig,
+    )
+
     # float8_weight_only quantizes weights to float8_e4m3fn while keeping
     # activations in bf16/fp16. This gives ~2x memory reduction with
     # minimal quality loss and uses PyTorch native FP8 tensor cores.

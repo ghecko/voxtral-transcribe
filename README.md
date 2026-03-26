@@ -131,20 +131,36 @@ docker run --rm \
 
 ## Quantization
 
-### FP8 Quantization (Recommended for GB10)
+### Recommended: bitsandbytes q4/q8 (Works Now)
 
-FP8 (E4M3) uses native PyTorch FP8 tensor-core support. This is the **recommended quantization path for the GB10** (Asus Ascent GX10 / DGX Spark). It reduces model size from ~8 GB (FP16) to ~4 GB with minimal quality loss.
-
-#### Prerequisites
+For immediate use on the GB10, bitsandbytes NF4 or INT8 quantization works out of the box and provides good speedups. No pre-quantization step needed — just pass a flag:
 
 ```bash
-pip install fp_quant
+# 4-bit NF4 quantization (smallest memory footprint, ~2 GB)
+docker compose run --rm voxtral-transcribe-spark /data/audio.mp3 \
+    --precision q4 --flash-attn --compile
+
+# 8-bit quantization (better quality, ~4 GB)
+docker compose run --rm voxtral-transcribe-spark /data/audio.mp3 \
+    --precision q8 --flash-attn --compile
 ```
+
+### FP8 Quantization (Experimental on GB10)
+
+FP8 (E4M3) uses torchao's `float8_weight_only` via `TorchAoConfig`. It reduces model size from ~8 GB (FP16) to ~4 GB with minimal quality loss and uses native FP8 tensor cores on Blackwell.
+
+> [!WARNING]
+> torchao must match your PyTorch version exactly. On GB10 / DGX Spark with PyTorch 2.11+cu130,
+> the pip `torchao` package may not have compatible aarch64 wheels yet. Install from the
+> PyTorch index or run inside the Docker container where dependencies are matched:
+> ```bash
+> pip install torchao --index-url https://download.pytorch.org/whl/cu130
+> ```
 
 #### Quantize and Use
 
 ```bash
-# Quantize the model (run on your GB10)
+# Quantize the model (run on your GB10 or inside Docker)
 python scripts/quantize_fp8.py --output-dir ./models/Voxtral-Mini-4B-FP8
 
 # Use the quantized model
