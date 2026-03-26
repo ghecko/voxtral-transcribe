@@ -9,6 +9,10 @@ bitsandbytes
 # Uses PyTorch native float8_e4m3fn, no CUTLASS dependency
 torchao
 
+# compressed-tensors — required for loading pre-quantized models
+# (e.g. RedHatAI/Voxtral-Small-24B-2507-FP8-dynamic)
+compressed-tensors
+
 # NVFP4 support (B200/B100 only — broken on GB10/SM120, see README)
 # fp_quant is required by transformers FPQuantConfig
 # qutlass provides the NVFP4 CUTLASS kernels (build from source)
