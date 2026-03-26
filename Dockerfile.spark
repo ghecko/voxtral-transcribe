@@ -11,8 +11,11 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Install Python dependencies (CUDA-specific requirements)
+# Note: compressed-tensors may pull an older transformers; we reinstall
+# transformers last to ensure VoxtralRealtimeForConditionalGeneration is available.
 COPY requirements.txt requirements-cuda.txt ./
-RUN pip install --no-cache-dir --ignore-installed -r requirements-cuda.txt
+RUN pip install --no-cache-dir --ignore-installed -r requirements-cuda.txt \
+    && pip install --no-cache-dir --force-reinstall 'transformers>=4.49.0'
 
 # Copy project files
 COPY . .

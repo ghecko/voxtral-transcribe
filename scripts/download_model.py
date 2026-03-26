@@ -30,7 +30,7 @@ def main():
     os.environ["HF_HOME"] = hf_home
 
     # Import here so HF_HOME is set before transformers reads it
-    from transformers import VoxtralRealtimeForConditionalGeneration, AutoProcessor
+    from transformers import AutoProcessor, AutoModel
     from transformers.utils import logging as hf_logging
 
     hf_logging.set_verbosity_error()
@@ -40,14 +40,28 @@ def main():
     AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
 
     # Download model weights (CPU-only — no GPU needed at build time)
-    # We use torch_dtype="auto" and device_map="cpu" to avoid needing a GPU.
+    # Use AutoModel to avoid ImportError when the specific model class
+    # isn't available in the installed transformers version. The right
+    # class will be resolved from config.json at runtime.
     print("  Downloading model weights...")
-    VoxtralRealtimeForConditionalGeneration.from_pretrained(
-        model_id,
-        torch_dtype="auto",
-        device_map="cpu",
-        trust_remote_code=True,
-    )
+    try:
+        # Try the specific class first (faster, no auto-detection overhead)
+        from transformers import VoxtralRealtimeForConditionalGeneration
+        VoxtralRealtimeForConditionalGeneration.from_pretrained(
+            model_id,
+            torch_dtype="auto",
+            device_map="cpu",
+            trust_remote_code=True,
+        )
+    except (ImportError, AttributeError):
+        # Fallback: use AutoModel (works with any transformers version)
+        print("  (using AutoModel fallback)")
+        AutoModel.from_pretrained(
+            model_id,
+            torch_dtype="auto",
+            device_map="cpu",
+            trust_remote_code=True,
+        )
 
     print(f"  Done. Model cached in {hf_home}")
 
