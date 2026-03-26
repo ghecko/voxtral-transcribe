@@ -34,8 +34,8 @@ def main():
     parser.add_argument("--min-speakers", type=int, default=None, help="Minimum number of speakers")
     parser.add_argument("--max-speakers", type=int, default=None, help="Maximum number of speakers")
     parser.add_argument(
-        "--precision", choices=["fp16", "fp8", "nvfp4", "q8", "q4"], default="fp16",
-        help="Model precision: fp16 (default), fp8 (Blackwell/Ada+), nvfp4 (Blackwell SM100 only), q8, q4",
+        "--precision", choices=["auto", "fp16", "fp8", "nvfp4", "q8", "q4"], default="fp16",
+        help="Model precision: auto (detect pre-quantized models), fp16, fp8, nvfp4 (SM100 only), q8, q4",
     )
     parser.add_argument(
         "--flash-attn", action="store_true",

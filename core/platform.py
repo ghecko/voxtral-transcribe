@@ -58,9 +58,13 @@ def get_torch_dtype(platform: str, precision: str) -> torch.dtype:
     """
     Return the torch dtype to use when loading the model.
 
-    NVFP4 quantization on Blackwell requires bf16 as the base dtype.
-    Everything else uses fp16 (or the quantiser's own dtype).
+    - NVFP4 quantization on Blackwell requires bf16 as the base dtype.
+    - Auto mode uses "auto" to let the model config decide (important for
+      pre-quantized checkpoints that store their own dtype).
+    - Everything else uses fp16 (or the quantiser's own dtype).
     """
+    if precision == "auto":
+        return "auto"  # type: ignore[return-value]  — transformers accepts "auto"
     if platform == "blackwell" and precision == "nvfp4":
         return torch.bfloat16
     return torch.float16

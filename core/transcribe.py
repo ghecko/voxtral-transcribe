@@ -17,17 +17,71 @@ from core.platform import (
 logging.getLogger("accelerate.big_modeling").setLevel(logging.ERROR)
 
 
-def _build_quantization_config(platform: str, precision: str):
+def _is_prequantized(model_id: str) -> str | None:
+    """
+    Detect if a model checkpoint is already pre-quantized from its HF config.
+    Returns the quant type string ("fp8", "gptq", "awq", etc.) or None.
+
+    Checks:
+      1. Model ID heuristics (e.g. "FP8" in name)
+      2. HF config.json quantization_config field (if downloadable)
+    """
+    if not model_id:
+        return None
+
+    # Fast heuristic: well-known naming conventions
+    model_lower = model_id.lower()
+    for tag in ("fp8", "-fp8-", "_fp8_", "fp8-dynamic"):
+        if tag in model_lower:
+            return "fp8"
+    for tag in ("gptq", "awq", "gguf"):
+        if tag in model_lower:
+            return tag
+
+    # Slow path: peek at config.json from HF Hub
+    try:
+        from transformers import AutoConfig
+        config = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
+        qc = getattr(config, "quantization_config", None)
+        if qc:
+            quant_method = qc.get("quant_method", None) if isinstance(qc, dict) else getattr(qc, "quant_method", None)
+            if quant_method:
+                return quant_method
+    except Exception:
+        pass
+
+    return None
+
+
+def _build_quantization_config(platform: str, precision: str, model_id: str = ""):
     """
     Build the right quantization config for the detected platform and
     requested precision.
 
-    - blackwell + fp8   → FPQuantConfig fp8 (native FP8 tensor-core path, recommended for GB10)
-    - blackwell + nvfp4 → FPQuantConfig nvfp4 (KNOWN BROKEN on GB10/SM120 — see README)
-    - cuda/rocm + q8    → BitsAndBytesConfig 8-bit
-    - cuda/rocm + q4    → BitsAndBytesConfig NF4
-    - fp16 / bf16       → None (no quantization)
+    - auto               → detect pre-quantized checkpoints, skip re-quantization
+    - blackwell + fp8    → TorchAoConfig fp8 (native FP8 tensor-core path)
+    - blackwell + nvfp4  → FPQuantConfig nvfp4 (KNOWN BROKEN on GB10/SM120 — see README)
+    - cuda/rocm + q8     → BitsAndBytesConfig 8-bit
+    - cuda/rocm + q4     → BitsAndBytesConfig NF4
+    - fp16 / bf16        → None (no quantization)
     """
+    # --- Auto mode: detect pre-quantized checkpoints ---
+    if precision == "auto":
+        prequant = _is_prequantized(model_id)
+        if prequant:
+            print(f"  Auto-detected pre-quantized model ({prequant}) — skipping quantization config")
+            return None
+        # Not pre-quantized: pick the best available precision for this platform
+        if platform == "blackwell":
+            print("  Auto mode on Blackwell — using q4 (bitsandbytes NF4)")
+            return _build_quantization_config(platform, "q4", model_id)
+        elif platform in ("cuda", "rocm"):
+            print("  Auto mode — using q4 (bitsandbytes NF4)")
+            return _build_quantization_config(platform, "q4", model_id)
+        else:
+            print("  Auto mode on CPU — using fp16 (no quantization)")
+            return None
+
     if precision == "fp8":
         if platform not in ("blackwell", "cuda"):
             raise RuntimeError(
@@ -117,7 +171,7 @@ class VoxtralTranscriber:
         self.processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
 
         # --- Build quantization config ---
-        quantization_config = _build_quantization_config(self.platform, precision)
+        quantization_config = _build_quantization_config(self.platform, precision, model_id)
         torch_dtype = get_torch_dtype(self.platform, precision)
 
         # --- Load model (suppress noisy HF warnings) ---

@@ -172,6 +172,33 @@ docker compose run --rm \
 MODEL_ID=./models/Voxtral-Mini-4B-FP8 docker compose build voxtral-transcribe-spark
 ```
 
+### Pre-Quantized Models (FP8-dynamic, GPTQ, AWQ)
+
+For models that ship with weights already quantized (e.g. RedHat's FP8-dynamic checkpoints), use `--precision auto`. This auto-detects that the checkpoint is pre-quantized and loads it without applying any additional quantization — no torchao or bitsandbytes needed.
+
+```bash
+# 24B FP8-dynamic model (~24 GB VRAM, higher quality than 4B)
+docker compose run --rm voxtral-transcribe-spark /data/audio.mp3 \
+    --model RedHatAI/Voxtral-Small-24B-2507-FP8-dynamic \
+    --precision auto --flash-attn --compile
+
+# A/B benchmark: 4B q4 vs 24B FP8-dynamic
+# Run A: 4B with NF4 quantization (~2 GB)
+docker compose run --rm voxtral-transcribe-spark /data/audio.mp3 \
+    --precision q4 --flash-attn --compile
+
+# Run B: 24B pre-quantized FP8 (~24 GB)
+docker compose run --rm voxtral-transcribe-spark /data/audio.mp3 \
+    --model RedHatAI/Voxtral-Small-24B-2507-FP8-dynamic \
+    --precision auto --flash-attn --compile
+```
+
+> [!NOTE]
+> The 24B model is 6x larger than the 4B — expect slower inference per token
+> but potentially better transcription quality. With 128 GB unified memory on the GB10,
+> both models fit comfortably. Use `--precision auto` for any pre-quantized checkpoint;
+> it also works with non-quantized models (falls back to q4 on GPU, fp16 on CPU).
+
 ### NVFP4 Quantization (B200/B100 Only)
 
 > [!WARNING]
@@ -212,7 +239,7 @@ docker compose run --rm \
 | `--output-dir` | Directory to save JSON/MD/TXT/SRT reports | `outputs` |
 | `--model` | Voxtral model ID or local path | `$MODEL_ID` or `mistralai/Voxtral-Mini-4B-Realtime-2602` |
 | `--device` | Compute backend (`auto`, `cuda`, `rocm`, `cpu`) | `auto` (detects platform) |
-| `--precision` | Model precision (`fp16`, `fp8`, `nvfp4`, `q8`, `q4`) | `fp16` |
+| `--precision` | Model precision (`auto`, `fp16`, `fp8`, `nvfp4`, `q8`, `q4`) | `fp16` |
 | `--flash-attn` | Enable SDPA flash attention (CK on ROCm, FA2 on CUDA/Blackwell) | Off |
 | `--compile` | Apply `torch.compile` for faster inference (first run slower) | Off |
 | `--hf-token` | HF token for Pyannote models | `$HF_TOKEN` env var |
