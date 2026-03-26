@@ -1,10 +1,10 @@
 # voxtral-transcribe
 
-**voxtral-transcribe** is a high-performance audio transcription and diarization pipeline optimized for Mistral's **Voxtral** models. It integrates Pyannote for speaker identification (with built-in VAD) and Hugging Face **Transformers** for native execution on AMD ROCm, NVIDIA CUDA, and CPU.
+**voxtral-transcribe** is a high-performance audio transcription and diarization pipeline built on Mistral's **Voxtral** models. It integrates Pyannote for speaker identification (with built-in VAD) and Hugging Face **Transformers** for native execution on NVIDIA Blackwell (GB10), NVIDIA CUDA, AMD ROCm, and CPU.
 
 > [!NOTE]
 > This repository was vibe-coded to provide an immediate solution for Voxtral-based transcription needs. It prioritizes stability and speed of deployment.
-> Not tested for cuda and cpu based hardware, and tested only with `mistralai/Voxtral-Mini-4B-Realtime-2602` model.
+> Tested primarily on AMD ROCm and NVIDIA Blackwell (Asus Ascent GX10) with `mistralai/Voxtral-Mini-4B-Realtime-2602`.
 
 ## Comparison with WhisperX
 
@@ -16,71 +16,176 @@ While inspired by WhisperX, this project has specific differences in its approac
 
 ## Key Features
 
-- **Multi-Backend Support**: Specialized Docker environments for ROCm 7.2, CUDA 13, and CPU.
+- **Multi-Backend Support**: Specialized Docker environments for Blackwell (GB10), CUDA, ROCm 7.2, and CPU.
+- **Auto Platform Detection**: Automatically detects Blackwell, CUDA, ROCm, or CPU at runtime and selects optimal device mapping and dtype.
+- **NVFP4 Quantization**: Native FP4 quantization on Blackwell GPUs for ~4x throughput improvement over FP16.
+- **Model Pre-Download**: Bake model weights into Docker images at build time for instant cold starts.
+- **Configurable Model**: Set `MODEL_ID` as an environment variable or build argument to use any compatible model.
 - **Format Agnostic**: Support for `.wav`, `.mp3`, `.m4a`, and more via FFmpeg-based loading.
 - **Unified VAD + Diarization**: Pyannote's pipeline handles both voice activity detection and speaker attribution in one pass — no reconciliation needed.
 - **Context-Carry**: Maintains transcription context across segments for natural sentence continuity.
 - **Speaker Count Hints**: Pass `--num-speakers`, `--min-speakers`, or `--max-speakers` to improve diarization accuracy.
+- **Performance Options**: SDPA flash attention (`--flash-attn`) and `torch.compile` (`--compile`) for additional speed gains.
 - **Report Generation**: Automatic export to JSON, Markdown, TXT, and SRT (subtitles).
 
 ## Architecture
 
-1.  **Audio Preprocessing**: FFmpeg loads any format and converts to 16kHz mono float32.
-2.  **Diarization + VAD**: Pyannote `speaker-diarization-community-1` performs voice activity detection and speaker attribution in a single pass.
-3.  **Inference**: Native Transformers backend with `VoxtralRealtimeForConditionalGeneration` and cross-segment context-carry for maximum accuracy.
+1. **Platform Detection**: `core/platform.py` auto-detects Blackwell (compute capability 10.x), CUDA, ROCm, or CPU and selects the optimal device map, dtype, and quantization strategy.
+2. **Audio Preprocessing**: FFmpeg loads any format and converts to 16kHz mono float32.
+3. **Model Loading**: Direct GPU placement on Blackwell/CUDA (`cuda:0`) skips Accelerate's profiling pass. ROCm uses `device_map='auto'` for HIP compatibility.
+4. **Diarization + VAD**: Pyannote `speaker-diarization-community-1` performs voice activity detection and speaker attribution in a single pass.
+5. **Inference**: Native Transformers backend with `VoxtralRealtimeForConditionalGeneration`, `torch.inference_mode()`, and cross-segment context-carry for maximum accuracy.
 
-## Getting Started (Docker Implementation)
+## Supported Platforms
 
-To ensure no modifications to your host system, Voxtral-transcribe runs entirely within Docker.
+| Platform | Dockerfile | Base Image | Quantization | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| **Blackwell (GB10)** | `Dockerfile.spark` | `nvcr.io/nvidia/pytorch:26.03-py3` | **fp8**, q8, q4, fp16 | Asus Ascent GX10, DGX Spark |
+| **Blackwell (B200)** | `Dockerfile.spark` | `nvcr.io/nvidia/pytorch:26.03-py3` | **nvfp4**, fp8, q8, q4, fp16 | B200, B100 (SM100) |
+| **CUDA** | `Dockerfile.cuda` | `pytorch/pytorch:2.10.0-cuda13.0-cudnn9-runtime` | q8, q4, fp16 | Pre-Blackwell NVIDIA GPUs |
+| **ROCm** | `Dockerfile.rocm` | `rocm/pytorch:rocm7.2_ubuntu24.04_py3.13_pytorch_release_2.10.0` | q8, q4, fp16 | AMD GPUs (MI300X, RX 7900, etc.) |
+| **CPU** | `Dockerfile.cpu` | — | fp16 | Fallback, significantly slower |
+
+## Getting Started (Docker)
 
 ### 1. Build the Target Image
 
-You don't need to build all images. Build only the one that matches your hardware:
+Build only the image that matches your hardware:
 
 ```bash
-# To build ONLY for AMD ROCm
+# Blackwell (Asus Ascent GX10, DGX Spark)
+docker compose build voxtral-transcribe-spark
+
+# AMD ROCm
 docker compose build voxtral-transcribe-rocm
 
-# To build ONLY for NVIDIA CUDA
+# NVIDIA CUDA (pre-Blackwell)
 docker compose build voxtral-transcribe-cuda
 
-# To build ONLY for CPU
+# CPU
 docker compose build voxtral-transcribe-cpu
+```
+
+By default, the model weights are downloaded during the build (baked into the image). To skip this:
+
+```bash
+PREDOWNLOAD_MODEL=0 docker compose build voxtral-transcribe-spark
+```
+
+To use a different model:
+
+```bash
+MODEL_ID=your-org/custom-voxtral docker compose build voxtral-transcribe-spark
 ```
 
 ### 2. Run Processing
 
 #### Prepare your data
-Place the audio files you want to transcribe in the `./audio` directory (create it if it doesn't exist). These files will be accessible inside the container at the path `/data/`.
+
+Place audio files in the `./audio` directory (create it if needed). These are accessible inside the container at `/data/`.
 
 #### Option A: Docker Compose (Recommended)
-This handles the complex device mappings and volumes automatically.
 
 ```bash
 # Set your HF token
 export HF_TOKEN="your_token_here"
 
-# Run processing on a specific file
-# Note: The file path must start with /data/ (mapping to your ./audio folder)
-docker compose run --rm voxtral-transcribe-rocm /data/your_audio.mp3
+# Basic transcription
+docker compose run --rm voxtral-transcribe-spark /data/your_audio.mp3
 
-# With speaker count hint for better accuracy
-docker compose run --rm voxtral-transcribe-rocm /data/interview.mp3 --num-speakers 2
+# With speaker count hint
+docker compose run --rm voxtral-transcribe-spark /data/interview.mp3 --num-speakers 2
+
+# With FP8 quantization + flash attention + torch.compile (Blackwell / GB10)
+docker compose run --rm voxtral-transcribe-spark /data/meeting.mp3 \
+    --precision fp8 --flash-attn --compile
+
+# ROCm with 8-bit quantization
+docker compose run --rm voxtral-transcribe-rocm /data/call.mp3 \
+    --precision q8 --flash-attn
 ```
 
 > [!TIP]
-> Anything added after the service name (`voxtral-transcribe-rocm`) overrides the default command in the `docker-compose.yaml` and is passed directly to the application.
+> Anything added after the service name overrides the default command and is passed directly to the application.
 
 #### Option B: Manual Docker Run
-If you prefer manual execution:
+
 ```bash
+# Blackwell (GX10)
+docker run --rm --gpus all \
+    -v ./audio:/data \
+    -v ./outputs:/outputs \
+    -e HF_TOKEN="your_token" \
+    voxtral-transcribe:spark \
+    /data/my_audio.mp3 --output-dir /outputs --precision fp8 --flash-attn
+
+# ROCm
 docker run --rm \
     --device=/dev/kfd --device=/dev/dri \
-    -v /path/to/audio:/data \
-    -v /path/to/outputs:/outputs \
-    -e HF_TOKEN="your_huggingface_token" \
+    -v ./audio:/data \
+    -v ./outputs:/outputs \
+    -e HF_TOKEN="your_token" \
     voxtral-transcribe:rocm \
     /data/my_audio.mp3 --output-dir /outputs --num-speakers 2
+```
+
+## Quantization
+
+### FP8 Quantization (Recommended for GB10)
+
+FP8 (E4M3) uses native PyTorch FP8 tensor-core support. This is the **recommended quantization path for the GB10** (Asus Ascent GX10 / DGX Spark). It reduces model size from ~8 GB (FP16) to ~4 GB with minimal quality loss.
+
+#### Prerequisites
+
+```bash
+pip install fp_quant
+```
+
+#### Quantize and Use
+
+```bash
+# Quantize the model (run on your GB10)
+python scripts/quantize_fp8.py --output-dir ./models/Voxtral-Mini-4B-FP8
+
+# Use the quantized model
+docker compose run --rm \
+    -e MODEL_ID=./models/Voxtral-Mini-4B-FP8 \
+    voxtral-transcribe-spark /data/audio.mp3 --precision fp8
+
+# Or bake it into the Docker image
+MODEL_ID=./models/Voxtral-Mini-4B-FP8 docker compose build voxtral-transcribe-spark
+```
+
+### NVFP4 Quantization (B200/B100 Only)
+
+> [!WARNING]
+> **NVFP4 is currently broken on the GB10 (SM120/SM121).** The CUTLASS FP4 GEMM kernels
+> require 128-256 KiB of shared memory, but the GB10 only provides 99 KiB. This causes
+> `Error Internal` crashes in `fusedQuantizeNvAbsMax`. Use FP8 instead on GB10 hardware.
+>
+> NVFP4 works on B200/B100 GPUs (SM100) which have sufficient shared memory.
+>
+> Tracking issues: [CUTLASS #2800](https://github.com/NVIDIA/cutlass/issues/2800), [CUTLASS #3096](https://github.com/NVIDIA/cutlass/issues/3096)
+
+NVFP4 quantizes from FP16 (~8 GB) down to ~2 GB and provides the highest throughput on SM100 Blackwell GPUs.
+
+#### Prerequisites (SM100 only)
+
+```bash
+sudo apt install python3-dev   # Python.h headers for compiling qutlass
+pip install fp_quant
+git clone https://github.com/IST-DASLab/qutlass.git
+cd qutlass && pip install --no-build-isolation .
+```
+
+#### Quantize and Use (SM100 only)
+
+```bash
+python scripts/quantize_nvfp4.py --output-dir ./models/Voxtral-Mini-4B-NVFP4
+
+docker compose run --rm \
+    -e MODEL_ID=./models/Voxtral-Mini-4B-NVFP4 \
+    voxtral-transcribe-spark /data/audio.mp3 --precision nvfp4
 ```
 
 ## CLI Arguments
@@ -89,12 +194,49 @@ docker run --rm \
 | :--- | :--- | :--- |
 | `input` | Path to the input audio file | Required |
 | `--output-dir` | Directory to save JSON/MD/TXT/SRT reports | `outputs` |
-| `--model` | Voxtral model ID | `mistralai/Voxtral-Mini-4B-Realtime-2602` |
-| `--hf-token` | HF token for Pyannote models | Environment Variable |
-| `--device` | Backend device (`cuda`, `rocm`, `cpu`) | `rocm` |
+| `--model` | Voxtral model ID or local path | `$MODEL_ID` or `mistralai/Voxtral-Mini-4B-Realtime-2602` |
+| `--device` | Compute backend (`auto`, `cuda`, `rocm`, `cpu`) | `auto` (detects platform) |
+| `--precision` | Model precision (`fp16`, `fp8`, `nvfp4`, `q8`, `q4`) | `fp16` |
+| `--flash-attn` | Enable SDPA flash attention (CK on ROCm, FA2 on CUDA/Blackwell) | Off |
+| `--compile` | Apply `torch.compile` for faster inference (first run slower) | Off |
+| `--hf-token` | HF token for Pyannote models | `$HF_TOKEN` env var |
 | `--num-speakers` | Exact number of speakers (improves accuracy) | Auto-detect |
 | `--min-speakers` | Minimum number of speakers | Auto-detect |
 | `--max-speakers` | Maximum number of speakers | Auto-detect |
+
+## Environment Variables
+
+| Variable | Description | Used In |
+| :--- | :--- | :--- |
+| `MODEL_ID` | Model ID or local path to load | Dockerfile (build-arg) + runtime |
+| `PREDOWNLOAD_MODEL` | Set to `0` to skip baking the model into the Docker image | Dockerfile (build-arg) |
+| `HF_TOKEN` | Hugging Face token for gated models (Pyannote) | Runtime |
+| `HF_HOME` | Cache directory for Hugging Face models | Dockerfile default: `/app/models` |
+
+## Project Structure
+
+```
+voxtral-transcribe/
+├── main.py                          # Entry point
+├── core/
+│   ├── platform.py                  # Platform detection (Blackwell/CUDA/ROCm/CPU)
+│   ├── transcribe.py                # Model loading and inference
+│   ├── audio.py                     # FFmpeg audio loading
+│   ├── diarize.py                   # Pyannote diarization
+│   └── format.py                    # Output formatting (JSON/MD/TXT/SRT)
+├── scripts/
+│   ├── download_model.py            # Pre-download model for Docker build
+│   ├── quantize_fp8.py              # FP8 quantization (recommended for GB10)
+│   └── quantize_nvfp4.py            # NVFP4 quantization (B200/B100 only)
+├── Dockerfile.spark                 # Blackwell (GB10) — nvcr.io NGC container
+├── Dockerfile.cuda                  # CUDA (pre-Blackwell)
+├── Dockerfile.rocm                  # AMD ROCm 7.2
+├── Dockerfile.cpu                   # CPU fallback
+├── docker-compose.yaml              # Orchestration for all platforms
+├── requirements.txt                 # Common Python dependencies
+├── requirements-cuda.txt            # CUDA/Blackwell extras (includes bitsandbytes)
+└── requirements-rocm.txt            # ROCm extras (includes bitsandbytes)
+```
 
 ## License
 

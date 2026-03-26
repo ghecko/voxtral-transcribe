@@ -1,5 +1,5 @@
-# Dockerfile for VoxtralX on NVIDIA CUDA (pre-Blackwell GPUs)
-FROM pytorch/pytorch:2.10.0-cuda13.0-cudnn9-runtime
+# Dockerfile for VoxtralX on NVIDIA CUDA / Blackwell (Asus Ascent GX10, DGX Spark)
+FROM nvcr.io/nvidia/pytorch:26.03-py3
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -12,18 +12,23 @@ WORKDIR /app
 
 # Install Python dependencies (CUDA-specific requirements)
 COPY requirements.txt requirements-cuda.txt ./
-RUN pip install --no-cache-dir -r requirements-cuda.txt
+RUN pip install --no-cache-dir --ignore-installed -r requirements-cuda.txt
 
 # Copy project files
 COPY . .
 
 # ── Environment variables ────────────────────────────────────────
+# Model to use — override at build time or run time:
+#   docker build --build-arg MODEL_ID=your-org/custom-model ...
+#   docker run -e MODEL_ID=your-org/custom-model ...
 ARG MODEL_ID=mistralai/Voxtral-Mini-4B-Realtime-2602
 ENV MODEL_ID=${MODEL_ID}
 ENV HF_HOME=/app/models
 ENV PYTHONPATH=/app
 
 # ── Pre-download model at build time ────────────────────────────
+# This bakes the model weights into the image so startup is instant.
+# Skip with: docker build --build-arg PREDOWNLOAD_MODEL=0 ...
 ARG PREDOWNLOAD_MODEL=1
 RUN if [ "$PREDOWNLOAD_MODEL" = "1" ]; then \
         python scripts/download_model.py; \

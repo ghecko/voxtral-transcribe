@@ -24,10 +24,38 @@ services:
       - TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1
     command: --help --device rocm
 
+  voxtral-transcribe-spark:
+    build:
+      context: .
+      dockerfile: Dockerfile.spark
+      args:
+        MODEL_ID: ${MODEL_ID:-mistralai/Voxtral-Mini-4B-Realtime-2602}
+        PREDOWNLOAD_MODEL: ${PREDOWNLOAD_MODEL:-1}
+    image: voxtral-transcribe:spark
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - .:/app
+      - ./outputs:/outputs
+      - ./audio:/data
+      - voxtral_hf_cache:/app/models
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - MODEL_ID=${MODEL_ID:-mistralai/Voxtral-Mini-4B-Realtime-2602}
+    command: --help
+
   voxtral-transcribe-cuda:
     build:
       context: .
       dockerfile: Dockerfile.cuda
+      args:
+        MODEL_ID: ${MODEL_ID:-mistralai/Voxtral-Mini-4B-Realtime-2602}
+        PREDOWNLOAD_MODEL: ${PREDOWNLOAD_MODEL:-1}
     image: voxtral-transcribe:cuda
     deploy:
       resources:
@@ -40,9 +68,11 @@ services:
       - .:/app
       - ./outputs:/outputs
       - ./audio:/data
+      - voxtral_hf_cache:/app/models
     environment:
       - HF_TOKEN=${HF_TOKEN}
-    command: --help --device cuda
+      - MODEL_ID=${MODEL_ID:-mistralai/Voxtral-Mini-4B-Realtime-2602}
+    command: --help
 
   voxtral-transcribe-cpu:
     build:

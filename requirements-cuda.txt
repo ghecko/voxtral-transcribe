@@ -1,0 +1,12 @@
+# ── CUDA / Blackwell specific dependencies ──────────────────────
+# Inherits everything from requirements.txt
+-r requirements.txt
+
+# bitsandbytes — q4/q8 quantization (works on CUDA, not needed if using NVFP4)
+bitsandbytes
+
+# NVFP4 support (Blackwell only — safe to install on non-Blackwell, just unused)
+# fp_quant is required by transformers FPQuantConfig
+# qutlass provides the NVFP4 CUTLASS kernels
+# NOTE: qutlass may need to be built from source on aarch64
+#   see: https://github.com/IST-DASLab/QuTLASS

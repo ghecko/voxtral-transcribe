@@ -1,3 +1,4 @@
+# ── Common dependencies (all platforms) ──────────────────────────
 pyannote.audio
 ffmpeg-python
 pydantic
@@ -7,4 +8,3 @@ numpy
 soundfile
 transformers>=4.49.0
 accelerate
-bitsandbytes
