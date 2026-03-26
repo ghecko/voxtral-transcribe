@@ -240,6 +240,7 @@ class VoxtralTranscriber:
 
         inputs = self.processor(
             audio=audio_segments,
+            text=[""] * len(audio_segments),
             return_tensors="pt",
             padding=True,
         ).to(self.model.device, dtype=self.model.dtype)
@@ -260,8 +261,14 @@ class VoxtralTranscriber:
     def _prepare_inputs(self, audio: np.ndarray, context: Optional[str] = None):
         """Tokenise audio (+ optional text context) and move to device."""
         kwargs = dict(audio=audio, return_tensors="pt")
+
+        # VoxtralProcessor (24B) requires `text`; VoxtralRealtimeProcessor
+        # (4B) treats it as optional.  Always pass a transcription prompt so
+        # both processor variants work.
         if context:
             kwargs["text"] = " ".join(context.split()[-30:])
+        else:
+            kwargs["text"] = ""
 
         return self.processor(**kwargs).to(self.model.device, dtype=self.model.dtype)
 
