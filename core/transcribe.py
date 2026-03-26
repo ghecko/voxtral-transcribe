@@ -34,8 +34,18 @@ def _build_quantization_config(platform: str, precision: str):
                 f"FP8 quantization requires an NVIDIA GPU with FP8 support (detected: {platform}). "
                 "Use --precision fp16, q8, or q4 on this hardware."
             )
-        from transformers import TorchAoConfig
-        return TorchAoConfig("float8_weight_only")
+        # FP8 uses torchao's TorchAoConfig. Requires torchao matching the
+        # PyTorch version — currently broken on PyTorch 2.11+cu130 (GB10).
+        try:
+            from torchao.quantization import float8_weight_only  # noqa: F401
+            from transformers import TorchAoConfig
+            return TorchAoConfig("float8_weight_only")
+        except (ImportError, Exception) as e:
+            raise RuntimeError(
+                f"FP8 quantization is not available: {e}\n"
+                "torchao is incompatible with this PyTorch version.\n"
+                "Use --precision q4 (recommended) or --precision q8 instead."
+            ) from e
 
     if precision == "nvfp4":
         if not supports_nvfp4(platform):
