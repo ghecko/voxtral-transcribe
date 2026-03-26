@@ -1,6 +1,6 @@
 import torch
 import logging
-from transformers import VoxtralRealtimeForConditionalGeneration, AutoProcessor
+from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
 from transformers.utils import logging as hf_logging
 import numpy as np
 from typing import Optional, List
@@ -191,7 +191,10 @@ class VoxtralTranscriber:
             if flash_attn:
                 load_kwargs["attn_implementation"] = "sdpa"
 
-            self.model = VoxtralRealtimeForConditionalGeneration.from_pretrained(
+            # Use AutoModelForSpeechSeq2Seq so the correct architecture is
+            # resolved from config.json — works for both VoxtralRealtime (4B)
+            # and VoxtralForConditionalGeneration (24B / pre-quantized).
+            self.model = AutoModelForSpeechSeq2Seq.from_pretrained(
                 model_id,
                 **load_kwargs,
             )
