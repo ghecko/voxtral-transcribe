@@ -169,6 +169,13 @@ class VoxtralTranscriber:
 
         # --- Load processor ---
         self.processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+        self.model_id = model_id
+
+        # Detect processor variant:
+        # - VoxtralRealtimeProcessor (4B): accepts audio= directly
+        # - VoxtralProcessor (24B): needs apply_chat_template / apply_transcription_request
+        self._is_realtime = hasattr(self.processor, 'feature_extractor') and \
+            type(self.processor).__name__ == "VoxtralRealtimeProcessor"
 
         # --- Build quantization config ---
         quantization_config = _build_quantization_config(self.platform, precision, model_id)
@@ -224,7 +231,15 @@ class VoxtralTranscriber:
             max_new_tokens = self._estimate_max_tokens(audio)
             generated_ids = self.model.generate(**inputs, max_new_tokens=max_new_tokens)
 
-        transcription = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+        if self._is_realtime:
+            # Realtime (4B): full decode — output IS the transcription
+            transcription = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+        else:
+            # Standard Voxtral (24B): strip prompt tokens from output
+            prompt_len = inputs.input_ids.shape[1]
+            transcription = self.processor.batch_decode(
+                generated_ids[:, prompt_len:], skip_special_tokens=True
+            )[0]
         return transcription.strip()
 
     # ------------------------------------------------------------------
@@ -234,13 +249,18 @@ class VoxtralTranscriber:
         """
         Transcribe multiple independent audio segments in a single forward pass.
         No context-carry — use this for segments from different speakers.
+        Only supported for the Realtime (4B) model. Falls back to sequential
+        transcription for standard Voxtral (24B).
         """
         if not audio_segments:
             return []
 
+        # Standard Voxtral (24B) doesn't support batched audio — fall back
+        if not self._is_realtime:
+            return [self.transcribe_segment(seg) for seg in audio_segments]
+
         inputs = self.processor(
             audio=audio_segments,
-            text=[""] * len(audio_segments),
             return_tensors="pt",
             padding=True,
         ).to(self.model.device, dtype=self.model.dtype)
@@ -260,17 +280,19 @@ class VoxtralTranscriber:
     # ------------------------------------------------------------------
     def _prepare_inputs(self, audio: np.ndarray, context: Optional[str] = None):
         """Tokenise audio (+ optional text context) and move to device."""
-        kwargs = dict(audio=audio, return_tensors="pt")
-
-        # VoxtralProcessor (24B) requires `text`; VoxtralRealtimeProcessor
-        # (4B) treats it as optional.  Always pass a transcription prompt so
-        # both processor variants work.
-        if context:
-            kwargs["text"] = " ".join(context.split()[-30:])
+        if self._is_realtime:
+            # VoxtralRealtimeProcessor (4B): direct audio= call
+            kwargs = dict(audio=audio, return_tensors="pt")
+            if context:
+                kwargs["text"] = " ".join(context.split()[-30:])
+            return self.processor(**kwargs).to(self.model.device, dtype=self.model.dtype)
         else:
-            kwargs["text"] = ""
-
-        return self.processor(**kwargs).to(self.model.device, dtype=self.model.dtype)
+            # VoxtralProcessor (24B): use apply_transcription_request
+            inputs = self.processor.apply_transcription_request(
+                audio=audio,
+                model_id=self.model_id,
+            )
+            return inputs.to(self.model.device, dtype=self.model.dtype)
 
     @staticmethod
     def _estimate_max_tokens(audio: np.ndarray) -> int:
