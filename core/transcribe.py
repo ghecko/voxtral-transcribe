@@ -34,12 +34,8 @@ def _build_quantization_config(platform: str, precision: str):
                 f"FP8 quantization requires an NVIDIA GPU with FP8 support (detected: {platform}). "
                 "Use --precision fp16, q8, or q4 on this hardware."
             )
-        from transformers import FPQuantConfig
-        return FPQuantConfig(
-            forward_dtype="fp8",
-            forward_method="abs_max",
-            modules_to_not_convert=["multi_modal_projector", "lm_head"],
-        )
+        from transformers import TorchAoConfig
+        return TorchAoConfig("float8_weight_only")
 
     if precision == "nvfp4":
         if not supports_nvfp4(platform):

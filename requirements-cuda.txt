@@ -2,11 +2,14 @@
 # Inherits everything from requirements.txt
 -r requirements.txt
 
-# bitsandbytes — q4/q8 quantization (works on CUDA, not needed if using NVFP4)
+# bitsandbytes — q4/q8 quantization (works on CUDA)
 bitsandbytes
 
-# NVFP4 support (Blackwell only — safe to install on non-Blackwell, just unused)
+# torchao — FP8 quantization via TorchAoConfig (recommended for GB10)
+# Uses PyTorch native float8_e4m3fn, no CUTLASS dependency
+torchao
+
+# NVFP4 support (B200/B100 only — broken on GB10/SM120, see README)
 # fp_quant is required by transformers FPQuantConfig
-# qutlass provides the NVFP4 CUTLASS kernels
-# NOTE: qutlass may need to be built from source on aarch64
+# qutlass provides the NVFP4 CUTLASS kernels (build from source)
 #   see: https://github.com/IST-DASLab/QuTLASS
