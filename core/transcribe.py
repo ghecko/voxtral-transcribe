@@ -288,9 +288,12 @@ class VoxtralTranscriber:
             return self.processor(**kwargs).to(self.model.device, dtype=self.model.dtype)
         else:
             # VoxtralProcessor (24B): use apply_transcription_request
-            # audio must be a list (single np.ndarray is misinterpreted as batch)
+            # audio must be a list (single np.ndarray is misinterpreted as batch).
+            # format must also be a list of same length — workaround for a
+            # transformers bug where format=None hits len(None).
             inputs = self.processor.apply_transcription_request(
                 audio=[audio],
+                format=["wav"],
                 sampling_rate=16000,
                 model_id=self.model_id,
             )
