@@ -8,3 +8,4 @@ numpy
 soundfile
 transformers>=4.49.0
 accelerate
+fastsafetensors>=0.1.10
