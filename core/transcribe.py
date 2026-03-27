@@ -214,6 +214,14 @@ class VoxtralTranscriber:
         finally:
             hf_logging.set_verbosity(prev_verbosity)
 
+        # Determine the dtype for model inputs.
+        # bitsandbytes quantized models report int8/uint8 as model.dtype,
+        # but inputs (audio features, embeddings) must stay in float.
+        if precision in ("q8", "q4"):
+            self._input_dtype = torch.float16
+        else:
+            self._input_dtype = torch_dtype if isinstance(torch_dtype, torch.dtype) else torch.float16
+
         print(f"  Model ready on {platform_summary(self.platform)}")
 
     # ------------------------------------------------------------------
@@ -263,7 +271,7 @@ class VoxtralTranscriber:
             audio=audio_segments,
             return_tensors="pt",
             padding=True,
-        ).to(self.model.device, dtype=self.model.dtype)
+        ).to(self.model.device, dtype=self._input_dtype)
 
         # Use the longest segment to estimate max tokens for the whole batch
         longest = max(len(a) for a in audio_segments)
@@ -285,7 +293,7 @@ class VoxtralTranscriber:
             kwargs = dict(audio=audio, return_tensors="pt")
             if context:
                 kwargs["text"] = " ".join(context.split()[-30:])
-            return self.processor(**kwargs).to(self.model.device, dtype=self.model.dtype)
+            return self.processor(**kwargs).to(self.model.device, dtype=self._input_dtype)
         else:
             # VoxtralProcessor (24B): use apply_transcription_request
             # audio must be a list (single np.ndarray is misinterpreted as batch).
@@ -297,7 +305,7 @@ class VoxtralTranscriber:
                 sampling_rate=16000,
                 model_id=self.model_id,
             )
-            return inputs.to(self.model.device, dtype=self.model.dtype)
+            return inputs.to(self.model.device, dtype=self._input_dtype)
 
     @staticmethod
     def _estimate_max_tokens(audio: np.ndarray) -> int:
